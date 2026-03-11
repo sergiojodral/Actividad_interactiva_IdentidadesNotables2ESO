@@ -173,6 +173,7 @@
       line-height:1.25;
       margin-bottom:10px;
     }
+
     .row{
       display:grid;
       grid-template-columns: 1fr 250px 1fr 120px;
@@ -182,6 +183,17 @@
     }
     @media(max-width:900px){
       .row{grid-template-columns: 1fr;}
+    }
+
+    .row-combined{
+      display:grid;
+      grid-template-columns: 1fr 1fr 120px;
+      gap:10px;
+      align-items:start;
+      margin:8px 0;
+    }
+    @media(max-width:900px){
+      .row-combined{grid-template-columns:1fr;}
     }
 
     .label{color:var(--muted); font-size:.92rem}
@@ -198,6 +210,10 @@
     .ans:focus{
       border-color: rgba(96,165,250,.75);
       box-shadow: 0 0 0 3px rgba(96,165,250,.12);
+    }
+    .ans:disabled{
+      opacity:.55;
+      cursor:not-allowed;
     }
     .ans.ok{
       border-color: rgba(34,197,94,.65);
@@ -246,6 +262,19 @@
       display:none;
     }
     .hint.show{ display:block; }
+
+    .formulaBox{
+      margin-top:8px;
+      padding:10px 12px;
+      border-radius:12px;
+      border:1px solid rgba(96,165,250,.35);
+      background: rgba(96,165,250,.10);
+      color:#dbeafe;
+      font-size:.95rem;
+      line-height:1.35;
+      display:none;
+    }
+    .formulaBox.show{ display:block; }
 
     .choiceRow{
       display:flex;
@@ -347,7 +376,8 @@
     }
     body.pdf-mode .preview,
     body.pdf-mode .status,
-    body.pdf-mode .gradeBox{
+    body.pdf-mode .gradeBox,
+    body.pdf-mode .formulaBox{
       background:#fff !important;
       border:1px solid #ddd !important;
     }
@@ -405,10 +435,10 @@
     <div class="card" style="margin-top:12px; background: rgba(0,0,0,.15)">
       <div class="sectionTitle">
         <div>
-          <span class="pill">1 · Reconoce la identidad</span>
-          <div class="note">Selecciona qué identidad notable se está usando en cada caso.</div>
+          <span class="pill">1 · Identifica y desarrolla</span>
+          <div class="note">Primero identifica el tipo de identidad notable. Si aciertas, se desbloquea el desarrollo.</div>
         </div>
-        <small>Cuadrado de suma, cuadrado de diferencia o suma por diferencia</small>
+        <small>8 ejercicios equilibrados y ordenados de menor a mayor dificultad</small>
       </div>
       <div class="list" id="sec1"></div>
     </div>
@@ -419,20 +449,9 @@
           <span class="pill">2 · Completa el término que falta</span>
           <div class="note">Escribe solo el término que falta. Ejemplos válidos: 8x, -12a, 25.</div>
         </div>
-        <small>Sin mostrar soluciones</small>
+        <small>6 apartados equilibrados y ordenados de menor a mayor dificultad</small>
       </div>
       <div class="list" id="sec2"></div>
-    </div>
-
-    <div class="card" style="margin-top:12px; background: rgba(0,0,0,.15)">
-      <div class="sectionTitle">
-        <div>
-          <span class="pill">3 · Desarrolla la expresión</span>
-          <div class="note">Puedes escribir el resultado en el orden que quieras. El sistema comprobará si es equivalente.</div>
-        </div>
-        <small>Con aviso si olvidas elevar también el coeficiente</small>
-      </div>
-      <div class="list" id="sec3"></div>
     </div>
 
     <div class="signature">
@@ -469,7 +488,7 @@
     </div>
     <div class="help">
       • Solo se usan las letras del teclado matemático: <b>x, y, a, b, m, p</b>.<br>
-      • Si una respuesta no es correcta, verás <b>Revisa</b>.<br>
+      • Primero identifica bien la identidad y después desarrolla.<br>
       • La nota sube automáticamente conforme aciertas.
     </div>
   </div>
@@ -492,6 +511,14 @@ function randomSeed32(){
   const a = new Uint32Array(1);
   crypto.getRandomValues(a);
   return a[0] >>> 0;
+}
+function shuffleWithRng(arr, rng){
+  const a = [...arr];
+  for(let i=a.length-1;i>0;i--){
+    const j = Math.floor(rng()*(i+1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
 }
 let rng = null;
 let focusedInput = null;
@@ -655,23 +682,56 @@ function getWrongSquaredCoefficientHint(ex, userText){
   return "";
 }
 
+function getFormulaLatexByKind(kind){
+  if(kind === "sumsq") return "$$(a+b)^2=a^2+2ab+b^2$$";
+  if(kind === "diffsq") return "$$(a-b)^2=a^2-2ab+b^2$$";
+  if(kind === "conj") return "$$(a+b)(a-b)=a^2-b^2$$";
+  return "";
+}
+
 /* =========================
    GENERACIÓN DE EJERCICIOS
 ========================= */
 const varPool = ["x","y","a","b","m","p"];
+const ID_KINDS = ["sumsq","diffsq","conj"];
 
 function randVar(rng){
   return varPool[rint(rng,0,varPool.length-1)];
 }
-function randCoeff(rng){
+function randCoeffByLevel(rng, level){
+  if(level <= 2) return 1;
+  if(level <= 5) return rng() < 0.65 ? 1 : rint(rng,2,4);
+  return rng() < 0.35 ? 1 : rint(rng,2,9);
+}
+function randConstByLevel(rng, level){
+  if(level <= 2) return rint(rng,1,4);
+  if(level <= 5) return rint(rng,2,6);
   return rint(rng,2,9);
 }
-function randConst(rng){
-  return rint(rng,1,9);
+function randPowByLevel(rng, level){
+  if(level <= 3) return 1;
+  if(level <= 6) return rng() < 0.8 ? 1 : 2;
+  return rng() < 0.55 ? 1 : 2;
 }
-function randPow(rng){
-  return rng() < 0.35 ? 2 : 1;
+
+function buildBalancedKindsCombined(rng){
+  const missingType = ID_KINDS[rint(rng,0,2)];
+  const pool = [];
+  ID_KINDS.forEach(k => {
+    const count = (k === missingType) ? 2 : 3;
+    for(let i=0;i<count;i++) pool.push(k);
+  });
+  return shuffleWithRng(pool, rng);
 }
+
+function buildBalancedKindsMissing(rng){
+  const pool = [];
+  ID_KINDS.forEach(k => {
+    for(let i=0;i<2;i++) pool.push(k);
+  });
+  return shuffleWithRng(pool, rng);
+}
+
 function atomStr(coef, variable, pow){
   return formatMonoStr(coef, variable, pow);
 }
@@ -721,47 +781,61 @@ function buildConjForms(Acoef, variable, pow, b){
   return {A, AL, A2, A2L, B2};
 }
 
-function makeIdentifyExercise(rng, idx){
-  const kind = ["sumsq","diffsq","conj"][rint(rng,0,2)];
+function makeCombinedExercise(rng, idx, level, kind){
   const variable = randVar(rng);
-  const Acoef = rng() < 0.65 ? 1 : randCoeff(rng);
-  const pow = randPow(rng);
-  const b = randConst(rng);
+  const Acoef = randCoeffByLevel(rng, level);
+  const pow = randPowByLevel(rng, level);
+  const b = randConstByLevel(rng, level);
 
   if(kind === "sumsq"){
     const f = buildTermSquareForms(Acoef, variable, pow, b);
     return {
-      id:`i_${idx}`,
+      id:`c_${idx}`,
       kind,
-      promptLatex:`\\((${f.AL}+${b})^2\\)`
+      promptLatex:`\\((${f.AL}+${b})^2\\)`,
+      answer: sqExpanded(f.A2, f.mid, f.B2, "+"),
+      squareInfo: buildSquareInfo(Acoef, variable, pow),
+      formulaLatex: getFormulaLatexByKind(kind),
+      difficulty: level
     };
   }
   if(kind === "diffsq"){
     const f = buildTermSquareForms(Acoef, variable, pow, b);
     return {
-      id:`i_${idx}`,
+      id:`c_${idx}`,
       kind,
-      promptLatex:`\\((${f.AL}-${b})^2\\)`
+      promptLatex:`\\((${f.AL}-${b})^2\\)`,
+      answer: sqExpanded(f.A2, f.mid, f.B2, "-"),
+      squareInfo: buildSquareInfo(Acoef, variable, pow),
+      formulaLatex: getFormulaLatexByKind(kind),
+      difficulty: level
     };
   }
   const f = buildConjForms(Acoef, variable, pow, b);
   return {
-    id:`i_${idx}`,
+    id:`c_${idx}`,
     kind,
-    promptLatex:`\\((${f.AL}+${b})(${f.AL}-${b})\\)`
+    promptLatex:`\\((${f.AL}+${b})(${f.AL}-${b})\\)`,
+    answer: conjExpanded(f.A2, f.B2),
+    squareInfo: null,
+    formulaLatex: getFormulaLatexByKind(kind),
+    difficulty: level
   };
 }
 
-function makeMissingExercise(rng, idx){
-  const kind = rng() < 0.5 ? (rng() < 0.5 ? "sumsq" : "diffsq") : "conj";
+function makeMissingExercise(rng, idx, level, kind){
   const variable = randVar(rng);
-  const Acoef = rng() < 0.65 ? 1 : randCoeff(rng);
-  const pow = randPow(rng);
-  const b = randConst(rng);
+  const Acoef = randCoeffByLevel(rng, level);
+  const pow = randPowByLevel(rng, level);
+  const b = randConstByLevel(rng, level);
 
   if(kind === "sumsq"){
     const f = buildTermSquareForms(Acoef, variable, pow, b);
-    const missing = rint(rng,0,2);
+    let missing;
+    if(level <= 2) missing = 2;
+    else if(level <= 4) missing = rint(rng,1,2);
+    else missing = rint(rng,0,2);
+
     let promptLatex = "";
     let answer = "";
     if(missing === 0){
@@ -774,12 +848,16 @@ function makeMissingExercise(rng, idx){
       promptLatex = `\\((${f.AL}+${b})^2 = ${f.A2L} + ${f.midL} + \\square\\)`;
       answer = f.B2;
     }
-    return { id:`m_${idx}`, promptLatex, answer };
+    return { id:`m_${idx}`, promptLatex, answer, difficulty: level, kind };
   }
 
   if(kind === "diffsq"){
     const f = buildTermSquareForms(Acoef, variable, pow, b);
-    const missing = rint(rng,0,2);
+    let missing;
+    if(level <= 2) missing = 2;
+    else if(level <= 4) missing = rint(rng,1,2);
+    else missing = rint(rng,0,2);
+
     let promptLatex = "";
     let answer = "";
     if(missing === 0){
@@ -792,11 +870,11 @@ function makeMissingExercise(rng, idx){
       promptLatex = `\\((${f.AL}-${b})^2 = ${f.A2L} - ${f.midL} + \\square\\)`;
       answer = f.B2;
     }
-    return { id:`m_${idx}`, promptLatex, answer };
+    return { id:`m_${idx}`, promptLatex, answer, difficulty: level, kind };
   }
 
   const f = buildConjForms(Acoef, variable, pow, b);
-  const missing = rint(rng,0,1);
+  const missing = level <= 3 ? 1 : rint(rng,0,1);
   let promptLatex = "";
   let answer = "";
   if(missing === 0){
@@ -806,44 +884,7 @@ function makeMissingExercise(rng, idx){
     promptLatex = `\\((${f.AL}+${b})(${f.AL}-${b}) = ${f.A2L} - \\square\\)`;
     answer = f.B2;
   }
-  return { id:`m_${idx}`, promptLatex, answer };
-}
-
-function makeDevelopExercise(rng, idx){
-  const kind = ["sumsq","diffsq","conj"][rint(rng,0,2)];
-  const variable = randVar(rng);
-  const Acoef = rng() < 0.6 ? 1 : randCoeff(rng);
-  const pow = randPow(rng);
-  const b = randConst(rng);
-
-  if(kind === "sumsq"){
-    const f = buildTermSquareForms(Acoef, variable, pow, b);
-    return {
-      id:`d_${idx}`,
-      kind,
-      promptLatex:`\\((${f.AL}+${b})^2\\)`,
-      answer: sqExpanded(f.A2, f.mid, f.B2, "+"),
-      squareInfo: buildSquareInfo(Acoef, variable, pow)
-    };
-  }
-  if(kind === "diffsq"){
-    const f = buildTermSquareForms(Acoef, variable, pow, b);
-    return {
-      id:`d_${idx}`,
-      kind,
-      promptLatex:`\\((${f.AL}-${b})^2\\)`,
-      answer: sqExpanded(f.A2, f.mid, f.B2, "-"),
-      squareInfo: buildSquareInfo(Acoef, variable, pow)
-    };
-  }
-  const f = buildConjForms(Acoef, variable, pow, b);
-  return {
-    id:`d_${idx}`,
-    kind,
-    promptLatex:`\\((${f.AL}+${b})(${f.AL}-${b})\\)`,
-    answer: conjExpanded(f.A2, f.B2),
-    squareInfo: null
-  };
+  return { id:`m_${idx}`, promptLatex, answer, difficulty: level, kind };
 }
 
 /* =========================
@@ -851,7 +892,6 @@ function makeDevelopExercise(rng, idx){
 ========================= */
 let EX1 = [];
 let EX2 = [];
-let EX3 = [];
 
 /* =========================
    RENDER
@@ -879,24 +919,49 @@ function setHint(hintId, text){
     MathJax.typesetPromise([el]).catch(()=>{});
   }
 }
+function setFormula(formulaId, text){
+  const el = document.getElementById(formulaId);
+  if(!el) return;
+  if(!text){
+    el.classList.remove("show");
+    el.innerHTML = "";
+    return;
+  }
+  el.classList.add("show");
+  el.innerHTML = text;
+  if(window.MathJax?.typesetPromise){
+    MathJax.typesetPromise([el]).catch(()=>{});
+  }
+}
 
 function renderAll(){
   const sec1 = document.getElementById("sec1");
   const sec2 = document.getElementById("sec2");
-  const sec3 = document.getElementById("sec3");
 
   sec1.innerHTML = EX1.map((ex, idx) => `
     <div class="ex">
       <div class="expr"><b>${String.fromCharCode(97+idx)})</b> ${ex.promptLatex}</div>
-      <div class="row" style="grid-template-columns: 1fr 1fr 120px;">
+
+      <div class="row-combined">
         <div class="choiceRow" id="${ex.id}_choices">
           <button class="choiceBtn" data-id="${ex.id}" data-value="sumsq">Cuadrado de una suma</button>
           <button class="choiceBtn" data-id="${ex.id}" data-value="diffsq">Cuadrado de una diferencia</button>
           <button class="choiceBtn" data-id="${ex.id}" data-value="conj">Suma por diferencia</button>
         </div>
-        <div class="label">Marca la opción correcta.</div>
-        <div class="status neutral" id="${ex.id}_s">—</div>
+        <div class="label">Paso 1: identifica la identidad.</div>
+        <div class="status neutral" id="${ex.id}_choice_s">—</div>
       </div>
+
+      <div class="formulaBox" id="${ex.id}_formula"></div>
+
+      <div class="row" style="margin-top:10px;">
+        <input class="ans" id="${ex.id}_dev" placeholder="Paso 2: desarrolla la expresión" disabled />
+        <div class="preview" id="${ex.id}_dev_p"></div>
+        <div class="label">Ejemplo: x^2+6x+9</div>
+        <div class="status neutral" id="${ex.id}_dev_s">—</div>
+      </div>
+
+      <div class="hint" id="${ex.id}_hint"></div>
     </div>
   `).join("");
 
@@ -912,19 +977,6 @@ function renderAll(){
     </div>
   `).join("");
 
-  sec3.innerHTML = EX3.map((ex, idx) => `
-    <div class="ex">
-      <div class="expr"><b>${String.fromCharCode(97+idx)})</b> ${ex.promptLatex} =</div>
-      <div class="row">
-        <input class="ans" id="${ex.id}" placeholder="Escribe el desarrollo" />
-        <div class="preview" id="${ex.id}_p"></div>
-        <div class="label">Ejemplo: x^2+6x+9</div>
-        <div class="status neutral" id="${ex.id}_s">—</div>
-      </div>
-      <div class="hint" id="${ex.id}_hint"></div>
-    </div>
-  `).join("");
-
   document.querySelectorAll("input.ans").forEach(inp => {
     inp.addEventListener("focus", ()=>{ focusedInput = inp; positionKeyboardNearInput(); });
     inp.addEventListener("click", ()=>{ focusedInput = inp; positionKeyboardNearInput(); });
@@ -936,18 +988,66 @@ function renderAll(){
 
 function attachCheckers(){
   EX1.forEach(ex => {
-    const st = document.getElementById(ex.id + "_s");
-    const key = ex.id + "_choice";
+    const stChoice = document.getElementById(ex.id + "_choice_s");
+    const devInp = document.getElementById(ex.id + "_dev");
+    const devSt = document.getElementById(ex.id + "_dev_s");
+    const key = ex.id + "_full";
+    const formulaId = ex.id + "_formula";
+    const hintId = ex.id + "_hint";
+
+    function resetDevelopmentPart(){
+      devInp.value = "";
+      devInp.disabled = true;
+      devInp.classList.remove("ok","bad");
+      document.getElementById(ex.id + "_dev_p").innerHTML = "";
+      devSt.className = "status neutral";
+      devSt.textContent = "—";
+      setHint(hintId, "");
+      setFormula(formulaId, "");
+      gradeMark(key, false);
+    }
+
     document.querySelectorAll(`#${ex.id}_choices .choiceBtn`).forEach(btn => {
       btn.addEventListener("click", () => {
         document.querySelectorAll(`#${ex.id}_choices .choiceBtn`).forEach(b => b.classList.remove("active"));
         btn.classList.add("active");
-        const good = btn.dataset.value === ex.kind;
-        st.className = "status " + (good ? "ok" : "bad");
-        st.textContent = good ? "OK" : "Revisa";
-        gradeMark(key, good);
+
+        const goodChoice = btn.dataset.value === ex.kind;
+        stChoice.className = "status " + (goodChoice ? "ok" : "bad");
+        stChoice.textContent = goodChoice ? "OK" : "Revisa";
+
+        if(goodChoice){
+          devInp.disabled = false;
+          setFormula(formulaId, ex.formulaLatex);
+        }else{
+          resetDevelopmentPart();
+        }
       });
     });
+
+    devInp.addEventListener("input", async () => {
+      await updatePreviewSafe(ex.id + "_dev_p", devInp.value);
+
+      if(devInp.value.trim() === ""){
+        setStatusVisual(devInp, devSt, "neutral");
+        setHint(hintId, "");
+        gradeMark(key, false);
+        return;
+      }
+
+      const good = equivalentExpressions(devInp.value, ex.answer);
+      setStatusVisual(devInp, devSt, good ? "ok" : "bad");
+
+      if(good){
+        setHint(hintId, "");
+        gradeMark(key, true);
+      }else{
+        const hint = getWrongSquaredCoefficientHint(ex, devInp.value);
+        setHint(hintId, hint);
+        gradeMark(key, false);
+      }
+    });
+
     gradeMark(key, false);
   });
 
@@ -968,42 +1068,12 @@ function attachCheckers(){
     });
     gradeMark(key, false);
   });
-
-  EX3.forEach(ex => {
-    const inp = document.getElementById(ex.id);
-    const st = document.getElementById(ex.id + "_s");
-    const key = ex.id + "_dev";
-    const hintId = ex.id + "_hint";
-
-    inp.addEventListener("input", async () => {
-      await updatePreviewSafe(ex.id + "_p", inp.value);
-
-      if(inp.value.trim() === ""){
-        setStatusVisual(inp, st, "neutral");
-        setHint(hintId, "");
-        gradeMark(key, false);
-        return;
-      }
-
-      const good = equivalentExpressions(inp.value, ex.answer);
-      setStatusVisual(inp, st, good ? "ok" : "bad");
-      gradeMark(key, good);
-
-      if(good){
-        setHint(hintId, "");
-      }else{
-        const hint = getWrongSquaredCoefficientHint(ex, inp.value);
-        setHint(hintId, hint);
-      }
-    });
-
-    gradeMark(key, false);
-  });
 }
 
 function resetAll(){
   document.querySelectorAll("input.ans").forEach(i => {
     i.value = "";
+    i.disabled = i.id.endsWith("_dev");
     i.classList.remove("ok","bad");
   });
   document.querySelectorAll(".status").forEach(s => {
@@ -1014,6 +1084,10 @@ function resetAll(){
   document.querySelectorAll(".hint").forEach(h => {
     h.classList.remove("show");
     h.innerHTML = "";
+  });
+  document.querySelectorAll(".formulaBox").forEach(f => {
+    f.classList.remove("show");
+    f.innerHTML = "";
   });
   document.querySelectorAll(".choiceBtn").forEach(b => b.classList.remove("active"));
   for(const k of gradeState.correctMap.keys()) gradeState.correctMap.set(k, false);
@@ -1143,6 +1217,7 @@ async function generatePDF(){
     const imgHmm = sliceH / pxPerMm;
 
     if(pageIndex > 0) pdf.addPage();
+
     pdf.setFont("helvetica","bold");
     pdf.setFontSize(11);
     pdf.text(`Alumno: ${name}`, margin, 8);
@@ -1171,14 +1246,21 @@ function generateSheet(){
 
   EX1 = [];
   EX2 = [];
-  EX3 = [];
 
-  const n1 = 6, n2 = 8, n3 = 8;
-  for(let i=0;i<n1;i++) EX1.push(makeIdentifyExercise(rng, i));
-  for(let i=0;i<n2;i++) EX2.push(makeMissingExercise(rng, i));
-  for(let i=0;i<n3;i++) EX3.push(makeDevelopExercise(rng, i));
+  const n1 = 8;
+  const n2 = 6;
 
-  gradeReset(n1 + n2 + n3);
+  const combinedKinds = buildBalancedKindsCombined(rng);
+  const missingKinds = buildBalancedKindsMissing(rng);
+
+  for(let i=0;i<n1;i++){
+    EX1.push(makeCombinedExercise(rng, i, i+1, combinedKinds[i]));
+  }
+  for(let i=0;i<n2;i++){
+    EX2.push(makeMissingExercise(rng, i, i+1, missingKinds[i]));
+  }
+
+  gradeReset(n1 + n2);
   renderAll();
   resetAll();
 }
@@ -1194,5 +1276,4 @@ document.getElementById("studentName").addEventListener("keydown", (e) => {
 });
 </script>
 </body>
-
 </html>
